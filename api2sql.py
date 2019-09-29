@@ -7,7 +7,6 @@ from dateutil.parser import parse
 import pyodbc
 import pandas as pd
 
-# command to run it in the terminal -->python -c 'import api2sql; ticket = api2sql.iter_tickets_from_api()'
 
 jb_param = {
     'mode':'all',
@@ -34,6 +33,7 @@ else:
 
 response = json.loads(p.content)
 
+id_list = []
 # Extract the field names
 
 i = 0
@@ -65,6 +65,9 @@ for i in range(len(response)):
     haschild = response[i]['HasChildren']
     i+=1
 
+    # Add to Id list for iteration
+    id_list.append(ticketid)
+
     # Reassign data types to extracted data points
 
     ticketid = str(ticketid)
@@ -93,17 +96,16 @@ for i in range(len(response)):
 
     createdate_1 = parse(createdate, fuzzy=True)
     updatedate = parse(lastupdate, fuzzy=True)
-    try: 
-      duedate_1 = parse(duedate, fuzzy=True)
+    try:
+      resolvedate_1 = parse(resolvedate, fuzzy=False, default= None)
     except ValueError:
-      pass
-
-    try: 
-      resolvedate_1 = parse(resolvedate, fuzzy=True)
+      resolvedate_1 = None
+    try:
+      duedate_1 = parse(duedate, fuzzy=False, default= None)
     except ValueError:
-      pass
-
-
+      duedate_1 = None
+    
+    #STRIP CategoryName int Category and SubCategory. Strip "-". Add variable and column name to
     # Connect to SQL
 
     connection = pyodbc.connect(
@@ -114,10 +116,13 @@ for i in range(len(response)):
         r'PWD=' + config.password
     )
     cursor = connection.cursor()
-    
-    #sql_exists = ('select * from JitBit where TicketId = ?')
-    sql_insert = ('INSERT INTO JitBit (TicketId,	Priority,	Subject,	Status,	Cust_Username,	Agent,	Cust_FirstName,	Cust_LastName,	Agent_FirstName,	Agent_LastName,	CustId,	CompanyId,	CompanyName,	AssignedTo,	CategoryName,	Cust_Email,	HasChildTicket, CreateDate, DueDate, LastUpdateDate, ResolveDate) values (?, ?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?, ?, ?, ?)')
-    cursor.execute(sql_insert, (ticketid, priority, subject, status, custusername, agent, cust_fn, cust_ln, agent_fn, agent_ln, custid, companyid, companyname, assignedto, categoryname, cust_email, haschild, createdate_1, duedate_1, updatedate, resolvedate_1))
+    sql_exists = ('SELECT count(TicketId) from JitBit where TicketId = ? and LastUpdateDate = ?')
+    cursor.execute(sql_exists, ())
+    for row in cursor.fetchall():
+      print(row)
+    # sql_update = ('UPDATE JitBit SET 	Priority = ?,	Subject = ?,	Status = ?,	Cust_Username = ?,	Agent = ?,	Cust_FirstName = ?,	Cust_LastName = ?,	Agent_FirstName = ?,	Agent_LastName = ?,	CustId = ?,	CompanyId = ?,	CompanyName = ?,	AssignedTo = ?,	CategoryName = ?,	Cust_Email = ?,	HasChildTicket = ?, CreateDate = ?, DueDate = ?, LastUpdateDate = ? WHERE TicketId = ?')
+    # sql_insert = ('INSERT INTO JitBit (TicketId,	Priority,	Subject,	Status,	Cust_Username,	Agent,	Cust_FirstName,	Cust_LastName,	Agent_FirstName,	Agent_LastName,	CustId,	CompanyId,	CompanyName,	AssignedTo,	CategoryName,	Cust_Email,	HasChildTicket, CreateDate, DueDate, LastUpdateDate, ResolveDate) values (?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?)')
+    # cursor.execute(sql_insert, (ticketid, priority, subject, status, custusername, agent, cust_fn, cust_ln, agent_fn, agent_ln, custid, companyid, companyname, assignedto, categoryname, cust_email, haschild, createdate_1, duedate_1, updatedate, resolvedate_1))
     #cursor.execute(sql_exists, ticketid)
     #rows = cursor.fetchone()
     
