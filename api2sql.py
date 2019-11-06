@@ -6,16 +6,15 @@ from datetime import date, datetime
 from dateutil.parser import parse
 import pyodbc
 import pandas as pd
-import logging
-import time
 import execute_time as ex
 
-# $ curl -u cegboh@archersystems.com:Abram0126 https://archer.jitbit.com/helpdesk/api/CustomFieldsForCategory?categoryId=394018
 
 def main():
 
+  # start_time creates a timestamp of when the script was executed. It will be written in a file called execute.py at the end of this script
   start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-  #print(start_time)
+
+  # last_execute is the timestamp from the last time the script was run
   last_executed = ex.execute_time
 
   jb_param = {
@@ -24,6 +23,7 @@ def main():
       'updatedFrom' : last_executed
   }
 
+  # grabs all the tickets that were changed since the "updated from time"
   p = requests.get("https://"+config.jb_domain+".jitbit.com/helpdesk/api/Tickets?", params=jb_param, auth=HTTPBasicAuth(config.jb_username, config.jb_password))
 
   if p.status_code == 200:
@@ -41,12 +41,10 @@ def main():
     print("x-request-id : " + p.headers['x-request-id'])
     print("Status Code : " + str(p.status_code))
 
-  # Call json.loads() to parse response
-
+  # call json.loads() to parse response
   response = json.loads(p.content)
-  
-  # Add to last updated ticketIds to a list for iteration 
 
+  # grabs only the ticketid from the json response and places it in a list.
   id_list = []
   i = 0
   for i in range(len(response)):
@@ -58,7 +56,7 @@ def main():
     -1 : 'Low', 0 : 'Normal',
      1 : 'High', 2 : 'Critical'}
      
-
+  # loops through the list of last_updated ticket ids. Parse through each field name of the ticket and maps it to the name in SQL 
   for id in id_list:
     p_id = requests.get("https://"+config.jb_domain+".jitbit.com/helpdesk/api/Ticket?id="+str(id), params=jb_param,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
 
@@ -141,7 +139,7 @@ def main():
       except ValueError:
         duedate_1 = None
 
-      # Parse CategoryId field to get info from custom field
+      # Parse CategoryId field to get info from custom field. (JitBit has a seperate API call needed for custom fields)
 
       get_custfields = requests.get("https://"+config.jb_domain+".jitbit.com/helpdesk/api/TicketCustomFields?id="+ticketid,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
       if get_custfields.status_code == 200:
@@ -210,9 +208,6 @@ def main():
 
       sql_insert = ('INSERT INTO JitBit (TicketId,	Priority,	Subject,	Status,	Cust_Username,	Agent,	Cust_FirstName,	Cust_LastName,	Agent_FirstName,	Agent_LastName,	CustId,	CompanyId,	CompanyName,	AssignedTo,	Category, Detail,	Cust_Email,	CreateDate, DueDate, LastUpdateDate, ResolveDate, Archer_Priority, CaseName, Agency_Collector, Request_Size, Archer_Status, FD_TIcketId, Ticket_Difficult, Processing_Time) values (?, ?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?)')
       cursor.execute(sql_insert, (ticketid, priority_map[priority], subject, status, custusername, agent, cust_fn, cust_ln, agent_fn, agent_ln, custid, companyid, companyname, assignedto, category, detail, cust_email, createdate_1, duedate_1, updatedate, resolvedate_1, arch_priority, casename, agency_col, req_size, arch_status, fd_id, ticket_diff, process_time))
-        # else:
-        #   sql_update = ('UPDATE JitBit SET 	Priority = ?,	Subject = ?,	Status = ?,	Cust_Username = ?,	Agent = ?,	Cust_FirstName = ?,	Cust_LastName = ?,	Agent_FirstName = ?,	Agent_LastName = ?,	CustId = ?,	CompanyId = ?,	CompanyName = ?,	AssignedTo = ?,	Category = ?,	Detail = ?, Cust_Email = ?,	CreateDate = ?, DueDate = ?, LastUpdateDate = ?, ResolveDate = ? WHERE TicketId = ?')
-        #   cursor.execute(sql_update, (priority_map[priority], subject, status, custusername, agent, cust_fn, cust_ln, agent_fn, agent_ln, custid, companyid, companyname, assignedto, category, detail, cust_email, createdate_1, duedate_1, updatedate, resolvedate_1, ticketid))
       sql_dedup = ('exec JitBit_DeDup')
       cursor.execute(sql_dedup)
       cursor.commit()
@@ -220,6 +215,7 @@ def main():
     else:
       print("GET response failed. Try again")
   f = open('execute_time.py', 'w')
+  # log the start time of this script to a seperate file which will be called on next time the script is run.
   f.write('execute_time =' + '"' + start_time + '"')
 
 main()
