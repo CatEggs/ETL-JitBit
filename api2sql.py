@@ -24,7 +24,7 @@ def main():
   }
 
   # grabs all the tickets that were changed since the "updated from time"
-  p = requests.get("https://"+config.jb_domain+".jitbit.com/helpdesk/api/Tickets?", params=jb_param, auth=HTTPBasicAuth(config.jb_username, config.jb_password))
+  p = requests.get("https://"+config.jb_url+"/helpdesk/api/Tickets?", params=jb_param, auth=HTTPBasicAuth(config.jb_username, config.jb_password))
 
   if p.status_code == 200:
     print("Request completed successfully")
@@ -58,7 +58,7 @@ def main():
      
   # loops through the list of last_updated ticket ids. Parse through each field name of the ticket and maps it to the name in SQL 
   for id in id_list:
-    p_id = requests.get("https://"+config.jb_domain+".jitbit.com/helpdesk/api/Ticket?id="+str(id), params=jb_param,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
+    p_id = requests.get("https://"+ config.jb_url +"/helpdesk/api/Ticket?id="+str(id), params=jb_param,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
 
     if p_id.status_code == 200:
       tix_response = json.loads(p_id.content)
@@ -141,7 +141,7 @@ def main():
 
       # Parse CategoryId field to get info from custom field. (JitBit has a seperate API call needed for custom fields)
 
-      get_custfields = requests.get("https://"+config.jb_domain+".jitbit.com/helpdesk/api/TicketCustomFields?id="+ticketid,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
+      get_custfields = requests.get("https://"+config.jb_url+"/helpdesk/api/TicketCustomFields?id="+ticketid,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
       if get_custfields.status_code == 200:
         customfield_response = json.loads(get_custfields.content)
         arch_priority = [customfield_response[i]['Value'] for i in range(0, len(customfield_response)) if customfield_response[i].get('FieldName', None) == 'Archer Priority']
