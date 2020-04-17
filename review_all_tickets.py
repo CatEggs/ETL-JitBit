@@ -129,34 +129,31 @@ def get_customfields(ticketid,customfield_response):
 
 def update_sql(ticketid, nf_dict, cf_dict):
     try:
-        if nf_dict["ticketid"] == cf_dict["ticketid"] & nf_dict["ticketid"] == str(ticketid) :
-            connection = pyodbc.connect(
-            r'DRIVER={SQL Server Native Client 11.0};'
-            r'SERVER=' + config.server + ';'
-            r'DATABASE=' + config.database + ';'
-            r'UID=' + config.username + ';'
-            r'PWD=' + config.password
-            )
+        connection = pyodbc.connect(
+        r'DRIVER={SQL Server Native Client 11.0};'
+        r'SERVER=' + config.server + ';'
+        r'DATABASE=' + config.database + ';'
+        r'UID=' + config.username + ';'
+        r'PWD=' + config.password
+        )
 
-            cursor = connection.cursor()
-            
-            # Create JitBit backup table
-            jitbit_backup = 'DROP TABLE IF EXISTS JitBit_BackUp; SELECT * INTO JitBit_BackUp FROM JitBit'
-            cursor.execute(jitbit_backup)
+        cursor = connection.cursor()
+        
+        # Create JitBit backup table
+        jitbit_backup = 'DROP TABLE IF EXISTS JitBit_BackUp; SELECT * INTO JitBit_BackUp FROM JitBit'
+        cursor.execute(jitbit_backup)
 
-            # Check existence of ticket in SQL
+        # Check existence of ticket in SQL
 
-            sql_insert = ('INSERT INTO JitBit (TicketId, TechTeam,	Technician,	CreateDate,	Status,	DueDate,	ResolveDate,	RequesterTeam,	Requester,	Casename,	Agency_Collector,	Category,	Detail,	Subject,	DifficultyLevel,	ProcessTime,	Archer_Priority,	LinkedTicket, UpdateDate, Tags) values (?, ?, ?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?, ?, ?)')
-            cursor.execute(sql_insert, (nf_dict['ticketid'],	nf_dict['assignedtodept'],	nf_dict['assignedto'],	nf_dict['createdate'],	nf_dict['status'],	nf_dict['duedate_1'],	nf_dict['resolvedate_1'],	nf_dict['custdept'],	nf_dict['custusername'],	cf_dict['casename'],	cf_dict['agency_col'],	nf_dict['category'], nf_dict['detail'],	nf_dict['subject'],	cf_dict['ticket_diff'],	cf_dict['process_time'],	cf_dict['arch_priority'],	cf_dict['linked_id'], nf_dict['lastupdate'], nf_dict['tag']))
-            sql_dedup = ('exec JitBit_DeDup')
-            cursor.execute(sql_dedup)
-            cursor.commit()
-            
-            return ("Done. JitBit Updated for {0}".format(str(nf_dict['ticketid'])))
-        else:
-            return ("TicketId mismatch for {0} & {1}".format(str(nf_dict['ticketid']), str(cf_dict['ticketid'])))
+        sql_insert = ('INSERT INTO JitBit (TicketId, TechTeam,	Technician,	CreateDate,	Status,	DueDate,	ResolveDate,	RequesterTeam,	Requester,	Casename,	Agency_Collector,	Category,	Detail,	Subject,	DifficultyLevel,	ProcessTime,	Archer_Priority,	LinkedTicket, UpdateDate, Tags) values (?, ?, ?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?,	?, ?, ?)')
+        cursor.execute(sql_insert, (nf_dict['ticketid'],	nf_dict['assignedtodept'],	nf_dict['assignedto'],	nf_dict['createdate'],	nf_dict['status'],	nf_dict['duedate_1'],	nf_dict['resolvedate_1'],	nf_dict['custdept'],	nf_dict['custusername'],	cf_dict['casename'],	cf_dict['agency_col'],	nf_dict['category'], nf_dict['detail'],	nf_dict['subject'],	cf_dict['ticket_diff'],	cf_dict['process_time'],	cf_dict['arch_priority'],	cf_dict['linked_id'], nf_dict['lastupdate'], nf_dict['tag']))
+        sql_dedup = ('exec JitBit_DeDup')
+        cursor.execute(sql_dedup)
+        cursor.commit()
+        
+        print ("Done. JitBit Updated for {0}".format(str(nf_dict['ticketid'])))
     except Exception as e:
-        return ("TicketId: {0} : Error:{1} \n".format( str(ticketid),str(e)))
+        print ("TicketId: {0} : Error:{1} \n".format( str(ticketid),str(e)))
 
 def check_status(response, filename, ticketid):
 
@@ -177,41 +174,42 @@ def main():
     logg_file = open(filename, "a+")
     # start_time creates a timestamp of when the script was executed. It will be written in a file called execute.py at the end of this script
 
-    df = pd.read_excel(r"C:\Users\cegboh\Desktop\PythonProjects\TicketProject\\all_tickets.xlsx")
+    df = pd.read_excel(r"..\\all_tickets.xlsx")
 
     # grabs only the ticketid from the json response and places it in a list.
     id_list = df['TicketID']
 
     for id in id_list:
-        # try:
-        r_nf = requests.get("https://"+ config.jb_url +"/helpdesk/api/Ticket?id="+str(id),auth=HTTPBasicAuth(config.jb_username, config.jb_password))
-        time.sleep(1)
-        r_cf = requests.get("https://"+config.jb_url+"/helpdesk/api/TicketCustomFields?id="+str(id),auth=HTTPBasicAuth(config.jb_username, config.jb_password))
-        time.sleep(1)
-        nf_statuscheck = check_status(r_nf,filename, id)
-        cf_statuscheck = check_status(r_cf,filename, id)
-        if nf_statuscheck == 1 or nf_statuscheck == 2:
-            #print("API request for normal status check's good for ticketid:{0}".format(str(id)))
-            tix_response = json.loads(r_nf.content)
-            ticket_fields = get_fields(tix_response)
-        else:
-            print("nf_statuscheck failed and passed")
-            pass
-        if cf_statuscheck == 1 or cf_statuscheck == 2:
-            #print("API request for custom status check's good for ticketid:{0}".format(str(id)))
-            customfield_response = json.loads(r_cf.content)
-            ticket_custfields = get_customfields(id,customfield_response)
-            if isinstance(ticket_fields, dict) and isinstance(ticket_custfields, dict):
-                update_sql(id, ticket_fields, ticket_custfields)
-                print("Done! Ticket Updated for ticketid {0}".format(str(id)))
-            else: 
-                logg_file.write("DictionaryCheck is False.\n" + ticket_fields +" - "+ ticket_custfields + "\n")
+        try:
+            r_nf = requests.get("https://"+ config.jb_url +"/helpdesk/api/Ticket?id="+str(id),auth=HTTPBasicAuth(config.jb_username, config.jb_password))
+            time.sleep(1)
+            r_cf = requests.get("https://"+config.jb_url+"/helpdesk/api/TicketCustomFields?id="+str(id),auth=HTTPBasicAuth(config.jb_username, config.jb_password))
+            time.sleep(1)
+            nf_statuscheck = check_status(r_nf,filename, id)
+            cf_statuscheck = check_status(r_cf,filename, id)
+            if nf_statuscheck == 1 or nf_statuscheck == 2:
+                #print("API request for normal status check's good for ticketid:{0}".format(str(id)))
+                tix_response = json.loads(r_nf.content)
+                ticket_fields = get_fields(tix_response)
+            else:
+                print("nf_statuscheck failed and passed")
                 pass
-        else:
-            print("cf_statuscheck failed and passed")
-            pass
-#         except Exception as e:
-#             #logg_file.write("Code broke for ticketid {0}. Error: {1}\n".format(str(id),str(e)))
-#             print("Code broke for ticketid {0}. Error: {1}".format(str(id),str(e)))
+            if cf_statuscheck == 1 or cf_statuscheck == 2:
+                #print("API request for custom status check's good for ticketid:{0}".format(str(id)))
+                customfield_response = json.loads(r_cf.content)
+                ticket_custfields = get_customfields(id,customfield_response)
+                if isinstance(ticket_fields, dict) and isinstance(ticket_custfields, dict):
+                    update_sql(id, ticket_fields, ticket_custfields)
+                    print("Done! Ticket Updated for ticketid {0}".format(str(id)))
+                else: 
+                    logg_file.write("DictionaryCheck is False.\n" + ticket_fields +" - "+ ticket_custfields + "\n")
+                    print("DictionaryCheck is False.\n" + ticket_fields +" - "+ ticket_custfields)
+                    pass
+            else:
+                print("cf_statuscheck failed and passed")
+                pass
+        except Exception as e:
+            logg_file.write("Code broke for ticketid {0}. Error: {1}\n".format(str(id),str(e)))
+            print("Code broke for ticketid {0}. Error: {1}".format(str(id),str(e)))
 main()
             
