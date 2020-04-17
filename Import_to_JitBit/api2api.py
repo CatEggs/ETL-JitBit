@@ -1,50 +1,210 @@
-import config
+# -*- coding: utf-8 -*-
+import pandas as pd
 import json
 import requests
-from requests.auth import HTTPBasicAuth
-from datetime import date, datetime
-from dateutil.parser import parse
-import pyodbc
-import pandas as pd
+import config
+from attachfiles import url_response
+import jb_mapping as jmap
+import time
+
+
+def create_ticket(id, fd_response):
+    jb_auth = (config.jb_username, config.jb_password)
+    field_path = r"..\\FD_TicketFields.txt"
+    error_file = "log_file\\logfile.txt"
+    completed_ticket = "log_file\\completedticketlist.txt"
+    
+    fd_ticketid = fd_response['id']
+    try:
+        fd_agent = fd_response['responder_id']
+    except KeyError:
+        fd_agent = None
+    try:
+        fd_requester = fd_response['requester_id']
+    except KeyError:
+        fd_requester = None
+    #fd_status = fd_response['status']
+    #fd_group = fd_response['group_id'] 
+    #fd_difficulty = fd_response['group_id'] #needs mapping
+    try:
+        fd_category = fd_response['custom_fields']['cf_detail']
+    except KeyError:
+        fd_category = "None"
+    try:
+        fd_section = fd_response['custom_fields']['cf_category']
+    except KeyError:
+        fd_section = "None"
+    fd_plaintiff = fd_response['custom_fields']['cf_plaintiff_law_firm']
+    fd_defendant = fd_response['custom_fields']['cf_defendant']
+    fd_body = bytes(fd_response['description_text'], 'utf-8', errors="surrogateescape").decode('unicode_escape')
+    fd_sub = fd_response['subject']
+    fd_priority = fd_response['priority'] 
+    #fd_duedate = fd_response['due_by']
+    fd_created = fd_response['created_at']
+    try:
+        fd_resolved = fd_response['stats']['resolved_at']
+    except KeyError:
+        fd_resolved = "None"
+    field_file = open(field_path, "w", encoding="utf-8")
+    field_file.write("Category: "+str(fd_section)+"\nSubcategory:"+str(fd_category)+"\nPlaintiff: "+str(fd_plaintiff)+"\nDefendant:"+str(fd_defendant)+"\nCreated Date: "+str(fd_created)+"\nResolved Date: "+str(fd_resolved)+ "\nBody: "+ str(fd_body))
+    field_file.close()
+
+    jb_payload = { 
+    'categoryId' :jmap.categoryid_map[None], 
+    'sectionId' : jmap.sectionid_map[None],
+    'body' : fd_body,
+    'subject' : fd_sub,
+    'priorityId' : jmap.priority_map[fd_priority] ,
+    'userId' : jmap.user_map.get(fd_requester)
+    }
+    
+    p = requests.post('https://'+ config.jb_url +'/helpdesk/api/ticket', auth = jb_auth , data = jb_payload)
+    
+    if p.status_code == 200:
+        print("success, ticket w/ attachment created")
+        jb_ticketid = json.loads(p.content)
+        created_file = open(completed_ticket, "a")
+        created_file.write(str(jb_ticketid) + " : "+ str(id) +"\n")
+        attachment_data = {}
+        for i in range(len(fd_response['attachments'])):
+            url = fd_response['attachments'][i]['attachment_url']
+            filename ='Orig' +'-' +str(i)+'-'+str(id) + '-'+ fd_response['attachments'][i]['name']
+            attachment_url = url_response(url, filename)
+            #attachment_url = s3_filetransfer(url, filename, jb_ticketid)
+            attachment_data.update({filename:open(attachment_url,'rb') })
+        attach2_payload = {'id':jb_ticketid}
+        linked_payload = {'ticketId':jb_ticketid, 'fieldId': "32410", 'value': str(id)}
+        casename_payload = {'ticketId':jb_ticketid, 'fieldId': "32377", 'value': "Other"}
+        agency_payload = {'ticketId':jb_ticketid, 'fieldId': "32378", 'value': "NA"}
+        difficulty_payload = {'ticketId':jb_ticketid, 'fieldId': "32379", 'value': "Easy"}
+        processtime_payload = {'ticketId':jb_ticketid, 'fieldId': "32373", 'value': "Less than 1 hour"}
+        techteam_payload ={'ticketId':jb_ticketid, 'fieldId': "32596", 'value': "Data Team"}
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/AttachFile', auth = jb_auth , data = attach2_payload , files= {'file':open(field_path, 'rb')}) 
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/SetCustomField', auth = jb_auth , data = linked_payload)
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/SetCustomField', auth = jb_auth , data = casename_payload) 
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/SetCustomField', auth = jb_auth , data = agency_payload) 
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/SetCustomField', auth = jb_auth , data = difficulty_payload) 
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/SetCustomField', auth = jb_auth , data = processtime_payload)  
+        requests.post('https://'+ config.jb_url +'/helpdesk/api/SetCustomField', auth = jb_auth , data = techteam_payload) 
+        if bool(attachment_data):
+            attach2 = requests.post('https://'+ config.jb_url +'/helpdesk/api/AttachFile', auth = jb_auth , data = attach2_payload , files= attachment_data)
+            if attach2.status_code == 200:
+                print("Great")
+            else:
+                print("Status code:" +str(attach2.status_code)+". Error message:"+ attach2.text)
+        else:
+            pass
+        update_payload = {
+        'id': jb_ticketid,
+        'date': fd_created,
+        'assignedUserId': jmap.user_map.get(fd_agent),
+        'statusId': 3
+            }
+        print(jb_ticketid)
+        if fd_response['conversations']:
+            for i in range(len(fd_response['conversations'])):
+                conversation_user = fd_response['conversations'][i]['user_id']
+                conversation_body = fd_response['conversations'][i]['body_text']+'\n-'+ jmap.comment_userid.get(conversation_user)
+                conversation_data = {}
+                if fd_response['conversations'][i]['attachments']:
+                    for j in range(len(fd_response['conversations'][i]['attachments'])):
+                        if fd_response['conversations'][i]['attachments'][j]:
+                            filename = 'Conversation' +'-' +str(j) + '-'+str(id)+'-'+ fd_response['conversations'][i]['attachments'][j]['name']
+                            filepath =  url_response(fd_response['conversations'][i]['attachments'][j]['attachment_url'], filename)
+                            conversation_data.update({'file': open(filepath,'rb')})
+                conversation_payload = {
+                'id': jb_ticketid,
+                'body': conversation_body
+                }
+                attach_payload ={
+                    'id':jb_ticketid
+                }
+                comment = requests.post('https://'+ config.jb_url +'/helpdesk/api/comment', auth = jb_auth , data = conversation_payload)
+                print('conversation has comment only')
+                if bool(conversation_data):
+                    attach = requests.post('https://'+ config.jb_url +'/helpdesk/api/AttachFile', auth = jb_auth , data = attach_payload ,  files= conversation_data)
+                    print('conversation has attachment')
+                    if attach.status_code ==200:
+                        print("success")
+                    else:
+                        print(attach.text)
+                        print("Attachement did not update. Status Code:"+str(attach.status_code))
+                else:
+                    pass
+
+                if comment.status_code == 200:
+                    print("comment successfully added")
+                else:
+                    comment_error = (f"comment failed to update for ticketid:"+str(jb_ticketid)+".\n Status code: "+str(comment.status_code)+ "\n")
+                    logg_file = open(error_file, "a")
+                    logg_file.write(comment_error)
+                    print(comment_error)
+        u = requests.post('https://'+ config.jb_url +'/helpdesk/api/UpdateTicket?', auth = jb_auth , data = update_payload)
+        if u.status_code == 200:
+            print("success, ticket successfully updated")
+            print(u.content)
+        else:
+            update_error=("Ticket failed to update for Id:"+str(jb_ticketid)+"\n Status code:" +str(u.status_code)+"\n")
+            logg_file = open(error_file, "a")
+            logg_file.write(update_error)
+            print(u.content)
+    else:
+        attach_error = ("Attachment failed to update for ticketid: "+str(fd_ticketid)+".\n Status code:"+str(p.status_code))
+        logg_file = open(error_file, "a")
+        logg_file.write(attach_error)
+        print(p.content)
+        print(attach_error)
 
 
 def main():
-    fd_param = {
-      'updated_since' : "2018-06-01T00:00:00Z"
-    }
-
-  # grabs all the tickets that were changed since the "updated from time"
-    r = requests.get("https://"+ config.fd_domain +".freshdesk.com/api/v2/tickets/", params=fd_param, auth = (config.api_key, config.fd_password))
-
-    if r.status_code == 200:
-      print("Request completed successfully")
-      #response = json.loads(r.content)
-      #print(json.dumps(response, indent=1))
-      with open('tickets.txt', 'w') as outfile:
-        response = json.loads(outfile)
-
-    else:
-      print("Failed to create ticket, errors are displayed below,")
-      response = json.loads(r.content)
-      print(response["errors"])
-      print("x-request-id : " + r.headers['x-request-id'])
-      print("Status Code : " + str(r.status_code))
-
-    # call json.loads() to parse response
-    #response = json.loads(r.content)
-
-    # grabs only the ticketid from the json response and places it in a list.
-    # id_list = []
-    # i = 0
-    # for i in range(len(response)):
-    #   ticketid = response[i]['IssueID']
-    #   id_list.append(ticketid)
-    #   i+=1
-
-    # loops through the list of last_updated ticket ids. Parse through each field name of the ticket and maps it to the name in SQL 
-    # for id in id_list:
-    #   p_id = requests.get("https://"+config.fd_domain+".jitbit.com/helpdesk/api/Ticket?id="+str(id), params=jb_param,auth=HTTPBasicAuth(config.jb_username, config.jb_password))
-      
-    #   if p_id.status_code == 200:
-
+    fd_auth = (config.fd_api_key, config.password)
+    df = pd.read_excel(r'..\\FD_MigratedTickets.xlsx')
+    error_file = "log_file\\logfile.txt"
+    error_file2 = "log_file\\missed_ticketlist.txt"
+    ticket_list = list(df['Ticket ID'])
+    waited_tickets = "log_file\\waited_tickets.txt"
+    
+    for id in ticket_list:
+        try:
+            r = requests.get('https://lienteam.freshdesk.com/api/v2/tickets/'+str(id)+'?include=conversations', auth = fd_auth)
+            if r.status_code == 200:
+                print("success")
+                fd_response = json.loads(r.content)
+                create_ticket(id, fd_response)
+            elif r.status_code == 429:
+                print(r.status_code)
+                print(int(r.headers["Retry-After"]))
+                wait_file = open(waited_tickets, "a")
+                wait_file.write(str(id))
+                time.sleep(int(r.headers["Retry-After"]))
+                r2 = requests.get('https://lienteam.freshdesk.com/api/v2/tickets/'+str(id)+'?include=conversations', auth = fd_auth)
+                if r2.status_code == 200:
+                    print("success")
+                    fd_response2 = json.loads(r2.content)
+                    create_ticket(id, fd_response2)
+                else:
+                    jbticket_error3 = ("Waited but ticket failed to be created for ticketid:"+str(id)+".\n Status code: "+str(r2.status_code)+"\n")
+                    logg_file = open(error_file, "a")
+                    logg_file.write(jbticket_error3)
+                    logg_file2 = open(error_file2, "a")
+                    logg_file2.write(str(id))
+                    print(r2.content)
+                    print(jbticket_error3)
+            else:
+                jbticket_error = ("ticket failed to be created for ticketid:"+str(id)+".\n Status code: "+str(r.status_code)+"\n")
+                logg_file = open(error_file, "a")
+                logg_file.write(jbticket_error)
+                logg_file2 = open(error_file2, "a")
+                logg_file2.write(str(id))
+                print(r.content)
+                print(jbticket_error)
+        except UnicodeDecodeError as unierr:
+            error = "UnicodeDecoderError: "+str(unierr)+": TicketId: "+ str(id) +"\n"
+            print(error)
+            logg_file = open(error_file, "a")
+            logg_file.write(error)
+            logg_file2 = open(error_file2, "a")
+            logg_file2.write(str(id))
+            pass
 main()
+
